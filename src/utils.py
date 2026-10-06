@@ -35,10 +35,70 @@ ROOT_DIR       = Path(__file__).resolve().parent.parent
 CHECKPOINT_DIR = ROOT_DIR / "checkpoints"
 OUTPUTS_DIR    = ROOT_DIR / "outputs"
 
-BEST_MODEL_PATH   = CHECKPOINT_DIR / "best_model.pth"
-TRAINING_LOG_PATH = CHECKPOINT_DIR / "training_log.json"
+BEST_MODEL_PATH       = CHECKPOINT_DIR / "best_model.pth"
+RESNET18_MODEL_PATH   = ROOT_DIR / "resnet18_oxford_pet.pth"
+TRAINING_LOG_PATH     = CHECKPOINT_DIR / "training_log.json"
 
-# ImageNet stats (ConvNeXt pretrained)
+# Oxford-IIIT Pet class names (37 breeds, 0-indexed alphabetical from dataset annotations)
+OXFORD_PET_CLASSES = [
+    "Abyssinian", "American Bulldog", "American Pit Bull Terrier", "Basset Hound",
+    "Beagle", "Bengal", "Birman", "Bombay", "Boxer", "British Shorthair",
+    "Chihuahua", "Egyptian Mau", "English Cocker Spaniel", "English Setter",
+    "German Shorthaired", "Great Pyrenees", "Havanese", "Japanese Chin",
+    "Keeshond", "Leonberger", "Maine Coon", "Miniature Pinscher", "Newfoundland",
+    "Persian", "Pomeranian", "Pug", "Ragdoll", "Russian Blue", "Saint Bernard",
+    "Samoyed", "Scottish Terrier", "Shiba Inu", "Siamese", "Sphynx",
+    "Staffordshire Bull Terrier", "Wheaten Terrier", "Yorkshire Terrier",
+]
+OXFORD_PET_NUM_CLASSES = len(OXFORD_PET_CLASSES)  # 37
+
+# Oxford-IIIT Pet full descriptive names (clarifies domestic feline/canine taxonomy and full breed names)
+OXFORD_PET_FULL_NAMES: dict[str, str] = {
+    "Abyssinian": "Abyssinian Cat",
+    "American Bulldog": "American Bulldog",
+    "American Pit Bull Terrier": "American Pit Bull Terrier",
+    "Basset Hound": "Basset Hound",
+    "Beagle": "Beagle",
+    "Bengal": "Bengal Cat",
+    "Birman": "Birman Cat",
+    "Bombay": "Bombay Cat",
+    "Boxer": "Boxer",
+    "British Shorthair": "British Shorthair Cat",
+    "Chihuahua": "Chihuahua",
+    "Egyptian Mau": "Egyptian Mau Cat",
+    "English Cocker Spaniel": "English Cocker Spaniel",
+    "English Setter": "English Setter",
+    "German Shorthaired": "German Shorthaired Pointer",
+    "Great Pyrenees": "Great Pyrenees",
+    "Havanese": "Havanese",
+    "Japanese Chin": "Japanese Chin",
+    "Keeshond": "Keeshond",
+    "Leonberger": "Leonberger",
+    "Maine Coon": "Maine Coon Cat",
+    "Miniature Pinscher": "Miniature Pinscher",
+    "Newfoundland": "Newfoundland",
+    "Persian": "Persian Cat",
+    "Pomeranian": "Pomeranian",
+    "Pug": "Pug",
+    "Ragdoll": "Ragdoll Cat",
+    "Russian Blue": "Russian Blue Cat",
+    "Saint Bernard": "Saint Bernard",
+    "Samoyed": "Samoyed",
+    "Scottish Terrier": "Scottish Terrier",
+    "Shiba Inu": "Shiba Inu",
+    "Siamese": "Siamese Cat",
+    "Sphynx": "Sphynx (Hairless Cat)",
+    "Staffordshire Bull Terrier": "Staffordshire Bull Terrier",
+    "Wheaten Terrier": "Soft-coated Wheaten Terrier",
+    "Yorkshire Terrier": "Yorkshire Terrier",
+}
+
+def get_pet_full_name(name: str) -> str:
+    """Return descriptive pet breed name with species/breed clarity."""
+    return OXFORD_PET_FULL_NAMES.get(name, name)
+
+
+# ImageNet stats (ConvNeXt & ResNet pretrained)
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD  = [0.229, 0.224, 0.225]
 IMAGE_SIZE    = 224
@@ -116,6 +176,79 @@ def load_model(
         model.load_state_dict(state["model_state_dict"])
     else:
         model.load_state_dict(state)
+
+    model.to(device)
+    model.eval()
+    return model
+
+
+def build_resnet18_model(
+    num_classes: int = OXFORD_PET_NUM_CLASSES,
+    pretrained: bool = False,
+) -> torch.nn.Module:
+    """
+    Build a ResNet-18 model for Oxford-IIIT Pet classification.
+
+    Args:
+        num_classes: Output head size (37 for Oxford-IIIT Pet).
+        pretrained:  Load ImageNet-1K weights when True.
+
+    Returns:
+        torch.nn.Module with a Linear(512, num_classes) classification head.
+    """
+    import torchvision.models as models
+    weights = models.ResNet18_Weights.DEFAULT if pretrained else None
+    model = models.resnet18(weights=weights)
+    model.fc = torch.nn.Linear(512, num_classes)
+    return model
+
+
+def load_resnet18_model(
+    checkpoint_path: Optional[Union[str, Path]] = None,
+    device: Optional[torch.device] = None,
+    num_classes: int = OXFORD_PET_NUM_CLASSES,
+) -> torch.nn.Module:
+    """
+    Load a trained ResNet-18 model from a saved checkpoint.
+
+    Args:
+        checkpoint_path: Path to ``.pth`` file. Defaults to
+                         ``resnet18_oxford_pet.pth``.
+        device:          Target device. Auto-detected if None.
+        num_classes:     Number of classes (default 37).
+
+    Returns:
+        Model in ``eval()`` mode on the target device.
+
+    Raises:
+        FileNotFoundError: If the checkpoint file does not exist.
+    """
+    if checkpoint_path is None:
+        checkpoint_path = RESNET18_MODEL_PATH
+    checkpoint_path = Path(checkpoint_path)
+
+    if not checkpoint_path.exists():
+        alt = CHECKPOINT_DIR / "resnet18_oxford_pet.pth"
+        if alt.exists():
+            checkpoint_path = alt
+        else:
+            raise FileNotFoundError(
+                f"\n  ResNet-18 checkpoint not found: {checkpoint_path}\n"
+                "  Please make sure resnet18_oxford_pet.pth exists in the project root.\n"
+            )
+
+    if device is None:
+        device = get_device()
+
+    model = build_resnet18_model(num_classes=num_classes, pretrained=False)
+    state = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+    if isinstance(state, dict) and "model_state_dict" in state:
+        model.load_state_dict(state["model_state_dict"])
+    elif isinstance(state, dict):
+        model.load_state_dict(state)
+    else:
+        model = state
 
     model.to(device)
     model.eval()

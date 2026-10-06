@@ -169,6 +169,103 @@ class ConvNeXtGradCAM:
         return cam, target_class, confidence
 
 
+class ResNetGradCAM:
+    """
+    GradCAM extractor for ResNet architectures (e.g., ResNet-18, ResNet-34, ResNet-50).
+
+    Target layer: ``model.layer4[-1]`` (the final residual block).
+
+    Usage::
+
+        gradcam = ResNetGradCAM(model, device)
+        cam, pred_cls, conf = gradcam.generate(pil_image)
+        gradcam.remove_hooks()
+    """
+
+    def __init__(self, model: torch.nn.Module, device: Optional[torch.device] = None) -> None:
+        self.model  = model
+        self.device = device or get_device()
+        self._activations: Optional[torch.Tensor] = None
+        self._handles: list = []
+        self._register_hooks()
+
+    def _get_target_layer(self) -> torch.nn.Module:
+        """Return the last residual block of layer4."""
+        try:
+            return self.model.layer4[-1]
+        except (AttributeError, IndexError):
+            return self.model.layer4
+
+    def _register_hooks(self) -> None:
+        target = self._get_target_layer()
+
+        def fwd_hook(module, inp, out):
+            # Only call retain_grad() when grad computation is enabled
+            if out.requires_grad:
+                out.retain_grad()
+            self._activations = out
+
+        self._handles.append(target.register_forward_hook(fwd_hook))
+
+    def remove_hooks(self) -> None:
+        """Deregister all hooks. Call this when done to free resources."""
+        for h in self._handles:
+            h.remove()
+        self._handles.clear()
+
+    @torch.enable_grad()
+    def generate(
+        self,
+        pil_image: Image.Image,
+        target_class: Optional[int] = None,
+    ):
+        """
+        Compute a GradCAM heatmap for the given PIL image.
+
+        Args:
+            pil_image:    Input PIL Image.
+            target_class: Class index to explain. If None, the model's
+                          predicted class is used.
+
+        Returns:
+            cam          : float32 ndarray of shape (H, W) in [0, 1].
+            pred_class   : Predicted (or specified) class index.
+            confidence   : Softmax probability for ``pred_class``.
+        """
+        self.model.eval()
+        self.model.zero_grad()
+
+        tensor = pil_to_tensor(pil_image).to(self.device)
+
+        logits = self.model(tensor)
+        probs  = F.softmax(logits, dim=1)
+
+        if target_class is None:
+            target_class = int(logits.argmax(1).item())
+        confidence = float(probs[0, target_class].item())
+
+        if self._activations is None:
+            raise RuntimeError(
+                "Forward hook did not fire on ResNet layer4. Verify the target layer exists."
+            )
+
+        score = logits[0, target_class]
+        grads = torch.autograd.grad(
+            score, self._activations, retain_graph=False, create_graph=False
+        )[0]                                              # (1, C, H, W)
+
+        weights = grads.mean(dim=(2, 3), keepdim=True)   # (1, C, 1, 1)
+
+        cam = (weights * self._activations).sum(dim=1)   # (1, H, W)
+        cam = F.relu(cam).squeeze()                      # (H, W)
+        cam = cam.detach().cpu().numpy()
+
+        mn, mx = cam.min(), cam.max()
+        cam = (cam - mn) / (mx - mn + 1e-8) if mx > mn else np.zeros_like(cam)
+
+        return cam, target_class, confidence
+
+
 # ─── Overlay Helper ───────────────────────────────────────────────────────────
 
 def overlay_heatmap_on_image(

@@ -39,6 +39,7 @@ class CircuitBreakerConfig:
     tau_fam: float = 0.35      # Family compromise threshold (35%)
     theta_warn: float = 0.25   # Warning threshold (enters HALF_OPEN)
     theta_trip: float = 0.55   # Trip threshold (enters OPEN)
+    open_action: Optional[str] = None  # Override action for OPEN state (e.g. "ESCALATE_TO_ZOOLOGIST")
 
     def __post_init__(self) -> None:
         total_weights = self.alpha + self.beta + self.gamma
@@ -191,7 +192,16 @@ class MetamorphicCircuitBreaker:
             action = "WARN_AND_PASS"
         else:
             state = CircuitBreakerState.OPEN
-            action = "TRIP_TO_DOCTOR"
+            if self.config.open_action:
+                action = self.config.open_action
+            else:
+                model_name = getattr(self.model, "__class__", type(self.model)).__name__.lower()
+                if "pet" in model_name or "resnet" in model_name:
+                    action = "ESCALATE_TO_ZOOLOGIST"
+                elif "convnext" in model_name or "skin" in model_name or "isic" in model_name:
+                    action = "TRIP_TO_DERMATOLOGIST"
+                else:
+                    action = "ESCALATE_TO_ZOOLOGIST"
 
         return DiagnosticReport(
             baseline_idx=base_idx,

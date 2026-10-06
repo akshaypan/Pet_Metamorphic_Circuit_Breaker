@@ -1,4 +1,4 @@
-﻿"""
+"""
 scripts/verify_all.py -- Full verification of the MCB backend.
 Run: python -m scripts.verify_all
 """
@@ -56,26 +56,50 @@ print("  [OK] CBI formula verified")
 print("  [OK] DummyVisionModel model-agnostic check passed")
 
 print("\n" + "=" * 60)
-print("STEP 3: ConvNeXtAdapter evaluation pipeline")
+print("STEP 3: ResNet18OxfordPetAdapter evaluation pipeline")
 print("=" * 60)
-from src.models.convnext_adapter import ConvNeXtAdapter
-model = ConvNeXtAdapter()
-cb2 = MetamorphicCircuitBreaker(model)
-t0 = __import__("time").time()
-report2 = cb2.evaluate(img)
-elapsed = __import__("time").time() - t0
-print(f"  Baseline: {report2.baseline_label} ({report2.baseline_confidence:.2%})")
-print(f"  CBI: {report2.cbi}  State: {report2.state.value}")
-print(f"  Elapsed: {elapsed:.2f}s  ({len(HIERARCHICAL_TEST_MATRIX)} tests)")
-assert 0.0 <= report2.cbi <= 1.0
-print("  [OK] ConvNeXt evaluation pipeline verified")
+from src.models.resnet_adapter import ResNet18OxfordPetAdapter
+from src.utils import RESNET18_MODEL_PATH
+if RESNET18_MODEL_PATH.exists():
+    resnet_model = ResNet18OxfordPetAdapter()
+    cb_resnet = MetamorphicCircuitBreaker(resnet_model)
+    t0 = __import__("time").time()
+    rep_res = cb_resnet.evaluate(img)
+    elapsed_res = __import__("time").time() - t0
+    print(f"  Baseline: {rep_res.baseline_label} ({rep_res.baseline_confidence:.2%})")
+    print(f"  CBI: {rep_res.cbi}  State: {rep_res.state.value}")
+    print(f"  Elapsed: {elapsed_res:.2f}s  ({len(HIERARCHICAL_TEST_MATRIX)} tests)")
+    assert 0.0 <= rep_res.cbi <= 1.0
+    print("  [OK] ResNet-18 Oxford Pet evaluation pipeline verified")
+else:
+    print(f"  [SKIP] ResNet-18 checkpoint not found at {RESNET18_MODEL_PATH}")
 
 print("\n" + "=" * 60)
-print("STEP 4: evaluate_with_gradcam (GradCAM integration)")
+print("STEP 4: ConvNeXtAdapter evaluation pipeline")
+print("=" * 60)
+from src.models.convnext_adapter import ConvNeXtAdapter
+from src.utils import BEST_MODEL_PATH
+if BEST_MODEL_PATH.exists():
+    model = ConvNeXtAdapter()
+    cb2 = MetamorphicCircuitBreaker(model)
+    t0 = __import__("time").time()
+    report2 = cb2.evaluate(img)
+    elapsed = __import__("time").time() - t0
+    print(f"  Baseline: {report2.baseline_label} ({report2.baseline_confidence:.2%})")
+    print(f"  CBI: {report2.cbi}  State: {report2.state.value}")
+    print(f"  Elapsed: {elapsed:.2f}s  ({len(HIERARCHICAL_TEST_MATRIX)} tests)")
+    assert 0.0 <= report2.cbi <= 1.0
+    print("  [OK] ConvNeXt evaluation pipeline verified")
+else:
+    print(f"  [SKIP] ConvNeXt best_model.pth not present (run src/train.py or download checkpoint)")
+
+print("\n" + "=" * 60)
+print("STEP 5: evaluate_with_gradcam (GradCAM integration)")
 print("=" * 60)
 import time
+active_cb = cb_resnet if RESNET18_MODEL_PATH.exists() else cb
 t0 = time.time()
-report3, gcam = cb2.evaluate_with_gradcam(img, max_gradcam_flips=2)
+report3, gcam = active_cb.evaluate_with_gradcam(img, max_gradcam_flips=2)
 elapsed = time.time() - t0
 assert gcam["baseline_cam"] is not None or True, "baseline_cam"
 print(f"  Elapsed: {elapsed:.2f}s")
@@ -84,7 +108,7 @@ print(f"  Flip CAMs generated: {len(gcam['flip_cams'])}")
 print("  [OK] evaluate_with_gradcam verified")
 
 print("\n" + "=" * 60)
-print("STEP 5: make_comparison_figure (in-memory PIL)")
+print("STEP 6: make_comparison_figure (in-memory PIL)")
 print("=" * 60)
 import numpy as np
 from src.gradcam import make_comparison_figure

@@ -1,4 +1,4 @@
-﻿# Metamorphic Circuit Breaker Framework
+# Metamorphic Circuit Breaker Framework
 
 > **Runtime Transform-Brittleness Detection and Explainability for Medical Vision Models**  
 > Applied to ISIC 2019 Skin Lesion Classification with ConvNeXt-Base
@@ -126,11 +126,12 @@ main_implementation/
 |-- scripts/
 |   |-- update_presets.py        # Curate verified live test images into data/presets/
 |   |-- verify_all.py            # Complete backend verification suite
+|   |-- verify_resnet.py         # ResNet-18 Oxford Pet end-to-end verification suite
 |   |-- verify_states.py         # Circuit breaker state validation script
 |   `-- demo_presets.py          # Automatic preset discoverer
 |-- src/
 |   |-- circuit_breaker.py       # MetamorphicCircuitBreaker and DiagnosticReport
-|   |-- gradcam.py               # ConvNeXtGradCAM and make_comparison_figure()
+|   |-- gradcam.py               # ConvNeXtGradCAM, ResNetGradCAM and make_comparison_figure()
 |   |-- metamorphic.py           # Phase 1: 8 flat metamorphic relations
 |   |-- metamorphic_families.py  # Phase 2: 22 hierarchical tests (3 families)
 |   |-- predict.py               # Phase 1 batch inference runner
@@ -140,7 +141,8 @@ main_implementation/
 |   `-- models/
 |       |-- base.py              # BaseVisionModel abstract base class
 |       |-- convnext_adapter.py  # ConvNeXt implementation of BaseVisionModel
-|       `-- dummy_model.py       # Mock model adapter for model-agnostic demonstrations
+|       |-- dummy_model.py       # Mock model adapter for model-agnostic demonstrations
+|       `-- resnet_adapter.py    # ResNet-18 Oxford-IIIT Pet implementation of BaseVisionModel
 |-- run_phase1.py                # Phase 1 batch pipeline entrypoint
 |-- streamlit_app.py             # Phase 2 interactive live dashboard
 |-- requirements.txt
@@ -261,6 +263,27 @@ The framework is decoupled from the ConvNeXt model. Another team member can plug
    ```
 
 A working reference mock adapter is available in `src/models/dummy_model.py`.
+
+3. **Pre-Built ResNet-18 Oxford-IIIT Pet Adapter (`src/models/resnet_adapter.py`):**
+   ```python
+   from src.models.resnet_adapter import ResNet18OxfordPetAdapter
+   from src.circuit_breaker import MetamorphicCircuitBreaker
+   from PIL import Image
+
+   # Initialize adapter with trained weights (37 pet breeds)
+   adapter = ResNet18OxfordPetAdapter("resnet18_oxford_pet.pth")
+   cb = MetamorphicCircuitBreaker(adapter)
+
+   # Run live metamorphic evaluation
+   report = cb.evaluate(Image.open("pet.jpg"))
+   print(f"Prediction: {report.baseline_label} ({report.baseline_confidence:.2%})")
+   print(f"CBI: {report.cbi:.4f} | State: {report.state.value} | Action: {report.action}")
+   ```
+
+   Verify the ResNet-18 adapter end-to-end:
+   ```bash
+   python -m scripts.verify_resnet
+   ```
 
 ---
 
